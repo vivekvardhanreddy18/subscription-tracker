@@ -20,15 +20,29 @@ def get_conn(with_db=True):
     cfg = dict(_BASE_CFG)
     if with_db:
         cfg["database"] = DB_NAME
+    if os.getenv("DB_SSL", "").lower() in ("1", "true", "yes"):
+        cfg["ssl_disabled"] = False
+        ca = os.getenv("DB_SSL_CA")
+        if ca:
+            cfg["ssl_ca"] = ca
     return mysql.connector.connect(**cfg)
 
 
 def init_db():
-    """Create the database and tables if they don't exist yet."""
-    conn = get_conn(with_db=False)
+    """Create the database (if allowed) and the tables if they don't exist yet."""
+    try:
+        conn = get_conn(with_db=True)
+    except mysql.connector.Error as e:
+        if e.errno != 1049:  # 1049 = unknown database
+            raise
+        root = get_conn(with_db=False)
+        rc = root.cursor()
+        rc.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4")
+        root.commit()
+        rc.close()
+        root.close()
+        conn = get_conn(with_db=True)
     cur = conn.cursor()
-    cur.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4")
-    conn.database = DB_NAME
     schema = (Path(__file__).parent / "schema.sql").read_text()
     for stmt in schema.split(";"):
         if stmt.strip():
